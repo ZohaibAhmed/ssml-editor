@@ -1,0 +1,41 @@
+.cardinal::after {
+  content: " cardinal";
+  vertical-align: super;
+  font-size: 6px;
+}
+
+.ordinal::after {
+  content: " ordinal";
+  vertical-align: super;
+  font-size: 6px;
+}
+
+.characters::after {
+  content: " characters";
+  vertical-align: super;
+  font-size: 6px;
+}
+
+.substitute::after {
+  content: " substitute";
+  vertical-align: super;
+  font-size: 6px;
+}
+
+.pitch::after {
+  content: " pitch";
+  vertical-align: super;
+  font-size: 6px;
+}
+
+.volume::after {
+  content: " volume";
+  vertical-align: super;
+  font-size: 6px;
+}
+
+.rate::after {
+  content: " rate";
+  vertical-align: super;
+  font-size: 6px;
+}
