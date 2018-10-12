@@ -1,5 +1,9 @@
+/* USAGE
+ * <SSMLEditor loadHTML={htmlToPreLoad} handleSSML={handler} handleHTML={handler} />
+**/
+
 import { Editor } from 'slate-react'
-import { Value } from 'slate'
+import Html from 'slate-html-serializer'
 
 import React from 'react'
 import { Button, Toolbar } from './components'
@@ -8,17 +12,143 @@ import swal from 'sweetalert2'
 
 import './editor.css';
 
+//////////// START RULES
+const BLOCK_TAGS = {
+  p: 'paragraph',
+  span: 'inline',
+}
+
+// Add a dictionary of mark tags.
+const MARK_TAGS = {
+  emphasis: 'emphasis',
+  cardinal: 'cardinal',
+  ordinal: 'ordinal',
+  characters: 'characters',
+  substitute: 'substitute',
+  pitch: 'pitch',
+  volume: 'volume',
+  rate: 'rate',
+}
+
+const rules = [
+  {
+    deserialize(el, next) {
+
+      const cls = el.className ? el.className.toLowerCase() : '';
+
+      if (!MARK_TAGS[cls]) {
+        const type = BLOCK_TAGS[el.tagName.toLowerCase()]
+        if (type) {
+          if (type == "inline") {
+            let attrs = {};
+            for (let k of el.attributes) {
+              attrs[k.name] = k.value;
+            }
+            return {
+              object: 'inline',
+              type: "break",
+              data: {
+                attrs: { ...attrs },
+              },
+              nodes: next(el.childNodes),
+            }
+          } else {
+            return {
+              object: 'block',
+              type: type,
+              data: {
+                className: el.getAttribute('class'),
+              },
+              nodes: next(el.childNodes),
+            }
+          }
+        }
+      }
+    },
+    serialize(obj, children) {
+      if (obj.object == 'block' || obj.object == 'inline') {
+        switch (obj.type) {
+          case 'break':
+            const attrs = obj.data.get('attrs')
+            return (
+              <Break
+                contentEditable={false}
+                attrs={attrs}
+              />
+            )
+          case 'paragraph':
+            return <p className={obj.data.get('className')}>{children}</p>
+        }
+      }
+    },
+  },
+  // Add a new rule that handles marks...
+  {
+    deserialize(el, next) {
+      if (!el.className) {
+        return;
+      }
+
+      const type = MARK_TAGS[el.className.toLowerCase()];
+      if (type) {
+        let attrs = {}
+        for (let k of el.attributes) {
+          attrs[k.name] = k.value;
+        }
+
+        return {
+          data: {
+            ...attrs,
+          },
+          object: 'mark',
+          type: type,
+          nodes: next(el.childNodes),
+        }
+      }
+    },
+    serialize(obj, children) {
+      if (obj.object == 'mark') {
+        const attrs = obj.data.get('attrs')
+        switch (obj.type) {
+          case 'emphasis':
+            return <strong className="emphasis" name="emphasis" {...attrs}>{children}</strong>
+          case 'cardinal':
+            return <span {...attrs} name="cardinal" className="cardinal">{children}</span>
+          case 'ordinal':
+            return <span {...attrs} name="ordinal" className="ordinal">{children}</span>
+          case 'characters':
+            return <span {...attrs} name="characters" className="characters">{children}</span>
+          case 'substitute':
+            return <span {...attrs} name="substitute" className="substitute">{children}</span>
+          case 'pitch':
+            return <span {...attrs} name="pitch" className="pitch" style={{ background: "#78AFF5" }}>{children}</span>
+          case 'volume':
+            return <span {...attrs} name="volume" className="volume" style={{ borderBottom: "1px solid #787CF5" }}>{children}</span>
+          case 'rate':
+            return <span {...attrs} name="rate" className="rate" style={{ borderBottom: "1px solid #D779DC", paddingBottom: 2 }}>{children}</span>
+        }
+      }
+    },
+  },
+]
+
+const html = new Html({ rules });
+/////// END RULES
+
 function Break(props) {
   const style = props.selected ? {
     outline: '2px solid blue',
     background: "#EEE",
     marginLeft: 10,
-    marginEight: 10,
-  } : {};
-  
+    marginRight: 10,
+  } : {
+      background: "#EEE",
+      marginLeft: 10,
+      marginRight: 10,
+    };
   return (
-    <span {...props.attrs} {...props.attributes} style={style}>
-      BREAK
+    <span className={'break'} {...props.attrs} {...props.attributes} style={style}>
+      ⏲️ <sup>{props.attrs.time}s</sup>
     </span>
   )
 }
@@ -26,27 +156,15 @@ function Break(props) {
 const noop = e => e.preventDefault();
 
 class SSMLEditor extends React.Component {
-  state = {
-    value: Value.fromJSON({
-      document: {
-        nodes: [
-          {
-            object: 'block',
-            type: 'paragraph',
-            nodes: [
-              {
-                object: 'text',
-                leaves: [
-                  {
-                    text: 'A line of text in a paragraph.',
-                  },
-                ],
-              },
-            ],
-          },
-        ],
-      },
-    }),
+  constructor(props) {
+    super(props);
+
+    const initialValue = props.loadHTML || "<p></p>";
+
+    this.state = {
+      isSelected: false,
+      value: html.deserialize(initialValue),
+    }
   }
 
   schema = {
@@ -58,10 +176,11 @@ class SSMLEditor extends React.Component {
   }
 
   render() {
+    const isSelected = this.state.isSelected;
     return (
-      <div>
+      <div id="SSMLEditor">
         <Toolbar>
-          <Button style={{ background: "#f45c42" }} onMouseDown={ async (e) => {
+          <Button style={{ background: "#f45c42" }} onMouseDown={async (e) => {
             const { value: time } = await swal({
               title: 'How long should the break be?',
               type: 'question',
@@ -75,14 +194,22 @@ class SSMLEditor extends React.Component {
               allowOutsideClick: false,
             });
 
-            this.onClickInsert(e, 'break', 'BREAK', {time,});
+            this.onClickInsert(e, 'break', 'BREAK', { time, });
           }}>
             Break
           </Button>
-          
+
           <Button
             style={{ background: "#F5EF78" }}
-            onMouseDown={ async (event) => {
+            onMouseDown={async (event) => {
+              if (!isSelected) {
+                swal({
+                  type: 'error',
+                  title: 'Oops...',
+                  text: 'You must have text selected',
+                });
+                return;
+              }
               const { value: emphasis } = await swal({
                 title: 'How much Emphasis?',
                 input: 'select',
@@ -97,7 +224,8 @@ class SSMLEditor extends React.Component {
                   return !value && 'You need to select an option'
                 }
               })
-              this.onClickMark(event, 'emphasis', {emphasis,})}
+              this.onClickMark(event, 'emphasis', { emphasis, })
+            }
             }>
             Emphasis
           </Button>
@@ -105,6 +233,14 @@ class SSMLEditor extends React.Component {
           <Button
             style={{ background: "#B1F578" }}
             onMouseDown={(event) => {
+              if (!isSelected) {
+                swal({
+                  type: 'error',
+                  title: 'Oops...',
+                  text: 'You must have text selected',
+                });
+                return;
+              }
               this.onClickMark(event, 'cardinal', { cardinal: "true" })
             }
             }>
@@ -114,24 +250,48 @@ class SSMLEditor extends React.Component {
           <Button
             style={{ background: "#78F5AF" }}
             onMouseDown={(event) => {
-              this.onClickMark(event, 'ordinal', {ordinal: "true"})
+              if (!isSelected) {
+                swal({
+                  type: 'error',
+                  title: 'Oops...',
+                  text: 'You must have text selected',
+                });
+                return;
+              }
+              this.onClickMark(event, 'ordinal', { ordinal: "true" })
             }
             }>
             Ordinal
           </Button>
 
           <Button
-            style={{ background: "#9eede0"}}
+            style={{ background: "#9eede0" }}
             onMouseDown={(event) => {
+              if (!isSelected) {
+                swal({
+                  type: 'error',
+                  title: 'Oops...',
+                  text: 'You must have text selected',
+                });
+                return;
+              }
               this.onClickMark(event, 'characters', { characters: "true" })
             }
             }>
-            Characters
+            Spell
           </Button>
 
           <Button
             style={{ background: "#78EAF5" }}
             onMouseDown={async (event) => {
+              if (!isSelected) {
+                swal({
+                  type: 'error',
+                  title: 'Oops...',
+                  text: 'You must have text selected',
+                });
+                return;
+              }
               const { value: sub } = await swal({
                 title: 'Enter what you would like to say instead',
                 input: 'text',
@@ -141,7 +301,7 @@ class SSMLEditor extends React.Component {
                 }
               });
 
-              this.onClickMark(event, 'substitute', {sub,})
+              this.onClickMark(event, 'substitute', { sub, })
             }
             }>
             Substitute
@@ -150,6 +310,14 @@ class SSMLEditor extends React.Component {
           <Button
             style={{ background: "#78AFF5" }}
             onMouseDown={async (event) => {
+              if (!isSelected) {
+                swal({
+                  type: 'error',
+                  title: 'Oops...',
+                  text: 'You must have text selected',
+                });
+                return;
+              }
               const { value: pitch } = await swal({
                 title: 'Select the pitch',
                 input: 'select',
@@ -167,7 +335,7 @@ class SSMLEditor extends React.Component {
                   return !value && 'You need to select an option'
                 }
               })
-              this.onClickMark(event, 'pitch', {pitch,})
+              this.onClickMark(event, 'pitch', { pitch, })
             }
             }>
             Pitch
@@ -176,6 +344,14 @@ class SSMLEditor extends React.Component {
           <Button
             style={{ background: "#787CF5" }}
             onMouseDown={async (event) => {
+              if (!isSelected) {
+                swal({
+                  type: 'error',
+                  title: 'Oops...',
+                  text: 'You must have text selected',
+                });
+                return;
+              }
               const { value: volume } = await swal({
                 title: 'Select the Volume',
                 input: 'select',
@@ -193,7 +369,7 @@ class SSMLEditor extends React.Component {
                   return !value && 'You need to select an option'
                 }
               })
-              this.onClickMark(event, 'volume', {volume,})
+              this.onClickMark(event, 'volume', { volume, })
             }
             }>
             Volume
@@ -202,6 +378,14 @@ class SSMLEditor extends React.Component {
           <Button
             style={{ background: "#D779DC" }}
             onMouseDown={async (event) => {
+              if (!isSelected) {
+                swal({
+                  type: 'error',
+                  title: 'Oops...',
+                  text: 'You must have text selected',
+                });
+                return;
+              }
               const { value: rate } = await swal({
                 title: 'Select what the rate of speech should be in %',
                 type: 'question',
@@ -213,7 +397,7 @@ class SSMLEditor extends React.Component {
                 },
                 inputValue: 0
               });
-              this.onClickMark(event, 'rate', {rate,})
+              this.onClickMark(event, 'rate', { rate, })
             }
             }>
             Rate
@@ -255,9 +439,7 @@ class SSMLEditor extends React.Component {
             contentEditable={false}
             onDrop={noop}
             attrs={attrs}
-          >
-            {code}
-          </Break>
+          ></Break>
         )
       }
     }
@@ -268,28 +450,32 @@ class SSMLEditor extends React.Component {
     const attrs = mark.data.get('attrs')
     switch (mark.type) {
       case 'emphasis':
-        return <strong {...attrs} {...attributes} {...attributes}>{children}</strong>
+        return <strong {...attrs} {...attributes} {...attributes} name="emphasis">{children}</strong>
       case 'cardinal':
-        return <span {...attrs} className="cardinal" {...attributes}>{children}</span>
+        return <span {...attrs} className="cardinal" name="cardinal" {...attributes}>{children}</span>
       case 'ordinal':
-        return <span {...attrs} className="ordinal" {...attributes}>{children}</span>
+        return <span {...attrs} className="ordinal" name="ordinal" {...attributes}>{children}</span>
       case 'characters':
-        return <span {...attrs} className="characters" {...attributes}>{children}</span>
+        return <span {...attrs} className="characters" name="characters" {...attributes}>{children}</span>
       case 'substitute':
-        return <span {...attrs} className="substitute" {...attributes}>{children}</span>
+        return <span {...attrs} className="substitute" name="substitute" {...attributes}>{children}</span>
       case 'pitch':
-        return <span {...attrs} style={{ background: "#78AFF5" }} {...attributes}>{children}</span>
+        return <span {...attrs} className="pitch" name="pitch" style={{ background: "#78AFF5" }} {...attributes}>{children}</span>
       case 'volume':
-        return <span {...attrs} style={{ borderBottom: "1px solid #787CF5" }} {...attributes}>{children}</span>
+        return <span {...attrs} className="volume" name="volume" style={{ borderBottom: "1px solid #787CF5" }} {...attributes}>{children}</span>
       case 'rate':
-        return <span {...attrs} style={{ borderBottom: "1px solid #D779DC", paddingBottom: 2 }} {...attributes}>{children}</span>  
+        return <span {...attrs} className="rate" name="rate" style={{ borderBottom: "1px solid #D779DC", paddingBottom: 2 }} {...attributes}>{children}</span>
     }
   }
 
   onChange = ({ value }) => {
+    if (value.fragment.text.length > 0) {
+      this.setState({
+        isSelected: true,
+      })
+    }
     if (value.document != this.state.value.document) {
       const doc = value.toJSON();
-      console.log(doc);
       const nodes = doc.document.nodes;
 
       let ssml = "<speak>";
@@ -310,7 +496,7 @@ class SSMLEditor extends React.Component {
               let prosody_attrs = [];
 
               for (let mark of section.marks) {
-                switch(mark.type) {
+                switch (mark.type) {
                   case 'emphasis':
                     opening.push(`<emphasis level="${mark.data.attrs.emphasis}">`);
                     closing.push("</emphasis>");
@@ -361,7 +547,14 @@ class SSMLEditor extends React.Component {
         ssml += "</p>"
       }
       ssml += "</speak>";
-      console.log(ssml);
+
+      if (this.props.handleSSML) {
+        this.props.handleSSML(ssml);
+      }
+      if (this.props.handleHTML) {
+        const string = html.serialize(value);
+        this.props.handleHTML(string);
+      }
     }
     this.setState({ value })
   }
@@ -369,7 +562,7 @@ class SSMLEditor extends React.Component {
   onClickMark = (event, type, attrs) => {
     event.preventDefault()
     const { value } = this.state
-    const change = value.change().toggleMark({type, data: {"attrs": attrs,}})
+    const change = value.change().toggleMark({ type, data: { "attrs": attrs, } })
     this.onChange(change)
   }
 
@@ -389,9 +582,5 @@ class SSMLEditor extends React.Component {
     this.onChange(change)
   }
 }
-
-/**
- * Export.
- */
 
 export default SSMLEditor

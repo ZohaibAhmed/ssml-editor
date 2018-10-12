@@ -11,6 +11,7 @@
     "react-emotion": "^9.2.10",
     "react-scripts": "1.1.5",
     "slate": "^0.41.2",
+    "slate-html-serializer": "^0.7.7",
     "slate-react": "^0.18.10",
     "sweetalert2": "^7.28.4"
   },
