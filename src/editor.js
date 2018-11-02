@@ -99,6 +99,7 @@ const rules = [
         return {
           data: {
             ...attrs,
+            attrs: attrs
           },
           object: 'mark',
           type: type,
